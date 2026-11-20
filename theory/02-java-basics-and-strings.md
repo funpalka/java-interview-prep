@@ -1,0 +1,240 @@
+# Типы, строки и базовые механизмы Java
+
+> Вопросы: 2, 3, 4, 5, 11, 13, 15, 20.
+
+## 2. Примитивные типы: размеры, диапазоны, значения по умолчанию
+
+<details>
+<summary>Показать ответ</summary>
+
+| Тип | Размер | Диапазон / значения | Default для поля или элемента массива |
+|---|---|---|---|
+| `byte` | 8 бит | −128…127 | `0` |
+| `short` | 16 бит | −32 768…32 767 | `0` |
+| `int` | 32 бита | −2³¹…2³¹−1 | `0` |
+| `long` | 64 бита | −2⁶³…2⁶³−1 | `0L` |
+| `char` | 16 бит | `\u0000`…`\uffff` (UTF-16 code unit) | `\u0000` |
+| `float` | 32 бита | IEEE 754; ≈ ±3.4×10³⁸, ~6–7 значащих цифр | `0.0f` |
+| `double` | 64 бита | IEEE 754; ≈ ±1.8×10³⁰⁸, ~15–16 значащих цифр | `0.0d` |
+| `boolean` | размер хранения не установлен JLS | `true` / `false` | `false` |
+
+**Важное уточнение:** локальные переменные **не получают** значения по умолчанию — их необходимо инициализировать перед чтением. Для ссылочных полей default — `null`. `char` — кодовая единица UTF-16, а не обязательно целый Unicode-символ.
+
+</details>
+
+## 3. Почему float/double нельзя использовать для денег? Что вместо?
+
+<details>
+<summary>Показать ответ</summary>
+
+`float` и `double` — двоичные числа с плавающей точкой IEEE 754. Многие десятичные дроби (например, `0.1`) не могут быть представлены точно в двоичной системе, поэтому результат арифметики приближен. Для финансовых расчётов опасны накопление погрешности, неявные округления и ошибки сравнения.
+
+```java
+System.out.println(0.1 + 0.2); // 0.30000000000000004
+System.out.println(0.1 + 0.2 == 0.3); // false
+
+BigDecimal bad  = new BigDecimal(0.1);    // захватывает неточное double
+BigDecimal good = new BigDecimal("0.1");  // точное десятичное значение
+BigDecimal also = BigDecimal.valueOf(0.1); // безопасный обычный путь из double
+BigDecimal sum = good.add(new BigDecimal("0.2")); // 0.3
+```
+
+Для денег обычно используют **`BigDecimal`** с явно установленными `scale` и `RoundingMode`, а также валютой в доменной модели. Для фиксированной валюты/минимальной единицы можно хранить **`long` в копейках/центах** (контролировать переполнение и курс). `BigDecimal` **immutable**: `price.add(tax)` не меняет `price`. `equals` учитывает scale (`1.0` и `1.00` не равны по `equals`), `compareTo` считает их численно равными. При `divide` без точного результата указывай масштаб/округление:
+
+```java
+BigDecimal amount = new BigDecimal("10.00");
+BigDecimal share = amount.divide(BigDecimal.valueOf(3), 2, RoundingMode.HALF_EVEN);
+// 3.33
+```
+
+**Trade-off:** `BigDecimal` медленнее `double`, но в деньгах корректность обычно важнее скорости. Не пытайся просто «округлять double в конце»: промежуточные вычисления всё ещё приблизительны.
+
+</details>
+
+## 4. Что такое String Pool и intern()?
+
+<details>
+<summary>Показать ответ</summary>
+
+**String Pool** — механизм повторного использования канонических строк. Строковые литералы и compile-time константные строковые выражения интернируются. В HotSpot пул поддерживается JVM; в современных HotSpot строки пула являются обычными объектами в heap (не отдельным «вечным» хранилищем PermGen).
+
+```java
+String a = "java";
+String b = "ja" + "va"; // компилятор сворачивает константы
+String c = new String("java");
+String d = c.intern();
+System.out.println(a == b);      // true
+System.out.println(a == c);      // false
+System.out.println(a == d);      // true
+System.out.println(a.equals(c)); // true
+```
+
+`intern()` возвращает **каноническую** строку из пула с тем же содержимым, добавляя её при необходимости. Не следует делать `intern()` для каждой строки входящего пользовательского трафика: пул удерживает ссылки на часто используемые значения и интернирование само стоит ресурсов; выигрыш зависит от распределения повторов и JVM. `==` проверяет идентичность ссылок, а **`equals` — символы**. Компиляция конкатенации с переменными отличается от константного выражения:
+
+```java
+String part = "ja";
+System.out.println((part + "va") == "java"); // обычно false: runtime concatenation
+```
+
+Зачем это нужно: сокращение дублирующихся объектов для одинаковых литералов и возможность общей канонической ссылки. Не путать String Pool с **string deduplication** у некоторых GC, которая может разделять внутренние массивы байтов, не объединяя сами объекты `String`.
+
+</details>
+
+## 5. StringBuilder vs StringBuffer
+
+<details>
+<summary>Показать ответ</summary>
+
+Оба класса — **изменяемые последовательности символов**, в отличие от `String`. `StringBuilder` не обеспечивает синхронизацию операций и обычно предпочтительнее, когда один поток строит строку. `StringBuffer` синхронизирует многие методы для совместного использования несколькими потоками; но **последовательность из нескольких вызовов не становится автоматически атомарной**.
+
+```java
+StringBuilder builder = new StringBuilder();
+for (int i = 0; i < 3; i++) builder.append(i).append(',');
+String result = builder.toString(); // "0,1,2,"
+```
+
+**Зачем эти механизмы нужны?** `String` immutable: в цикле `s += piece` при каждом шаге обычно возникает новая строка/копирование уже собранного содержимого → при большом числе итераций стоимость может расти квадратично. Builder хранит расширяемый буфер и делает `append` амортизированно эффективным. Компилятор/JVM оптимизирует **одну** конкатенацию `a + b + c`, поэтому не надо вручную заменять каждую `+` на builder. Для потоков чаще безопаснее строить отдельные строки и объединять результат, чем разделять один `StringBuffer`.
+
+| | String | StringBuilder | StringBuffer |
+|---|---|---|---|
+| Мутация | нет | да | да |
+| Синхронизация | не требуется для неизменяемого содержимого | нет | отдельные методы синхронизированы |
+| Использование | хранение/обмен значениями | циклы, формирование текста | редко — общий mutable buffer под синхронизацией |
+
+</details>
+
+## 11. Autoboxing/unboxing и подводные камни
+
+<details>
+<summary>Показать ответ</summary>
+
+**Autoboxing** — автоматическое превращение `int` в `Integer`, **unboxing** — обратное. Проблемы: `NullPointerException` при распаковке `null`, дополнительная аллокация/нагрузка (не всегда), случайное сравнение ссылок через `==` и перегрузки/приведение типов.
+
+```java
+Integer n = null;
+// int x = n; // NullPointerException
+Integer a = 127, b = 127;
+Integer c = 128, d = 128;
+System.out.println(a == b); // true (кеширование гарантированного диапазона)
+System.out.println(c == d); // не рассчитывайте на true
+```
+
+Сравнивай значения через `equals` после проверки `null`, либо распаковывай намеренно. В горячих циклах предпочитай примитивы, если не нужна nullable-семантика.
+
+</details>
+
+## 13. Методы Object
+
+<details>
+<summary>Показать ответ</summary>
+
+Все классы неявно наследуют `java.lang.Object` (кроме самого `Object`; массивы также являются объектами). Основные методы:
+
+| Метод | Для чего | Нюанс |
+|---|---|---|
+| `equals(Object)` | логическое равенство | по умолчанию сравнение идентичности, часто переопределяют |
+| `hashCode()` | hash для map/set | должен согласовываться с `equals` |
+| `toString()` | текст для диагностики | не включать секреты/PII |
+| `getClass()` | фактический `Class<?>` объекта | `final`, не переопределить |
+| `wait()`, `wait(long)`, `wait(long,int)` | ожидание на мониторе объекта | вызов только при владении монитором, иначе `IllegalMonitorStateException`; ожидание в цикле |
+| `notify()`, `notifyAll()` | будят один/все ожидающие на том же мониторе | не гарантируют немедленного выполнения; предпочтительны высокоуровневые concurrency-примитивы |
+| `clone()` | попытка поверхностного копирования | `protected`, `Cloneable` + правила, сложный API |
+| `finalize()` | историческая финализация | deprecated for removal; **не использовать**, не гарантирует своевременный вызов |
+
+```java
+final Object lock = new Object();
+// Для иллюстрации: в реальном коде условие меняется другим потоком.
+synchronized (lock) {
+    while (!ready) lock.wait(); // wait отпускает монитор lock
+}
+// В другом потоке после изменения ready под тем же lock:
+synchronized (lock) { ready = true; lock.notifyAll(); }
+```
+
+`wait` освобождает монитор, а `Thread.sleep` — нет. Пример — схема, а не законченная запускаемая программа (`ready` должен быть общим состоянием). Контракт `equals/hashCode` см. вопрос 14.
+
+</details>
+
+## 15. Как копировать объекты: clone(), shallow vs deep copy
+
+<details>
+<summary>Показать ответ</summary>
+
+**Shallow copy** копирует сам объект и его поля: примитивы по значению, ссылки — на *те же вложенные объекты*. **Deep copy** рекурсивно создаёт независимые копии требуемого графа изменяемых объектов. Полностью глубокая копия не всегда нужна: неизменяемые `String`, `record` со скалярными полями и т. п. можно разделять.
+
+```java
+class Address { String city; Address(String city) { this.city = city; } }
+class Person {
+    String name;
+    Address address;
+    Person(String name, Address address) {
+        this.name = name; this.address = address;
+    }
+    Person shallowCopy() { return new Person(name, address); }
+    Person deepCopy() { return new Person(name, new Address(address.city)); }
+}
+Person original = new Person("Ann", new Address("Paris"));
+Person shallow = original.shallowCopy();
+Person deep = original.deepCopy();
+original.address.city = "Rome";
+System.out.println(shallow.address.city); // Rome
+System.out.println(deep.address.city);    // Paris
+```
+
+`Object.clone()` — `protected` и по умолчанию делает **поверхностное** копирование полей, только если объект поддерживает `Cloneable` (иначе `CloneNotSupportedException`). `Cloneable` — marker interface, у него нет публичного `clone()`; часто метод нужно открывать явно. При наследовании и `final` полях реализовать корректный `clone` трудно.
+
+**Предпочтения на практике:** явный copy constructor, статическая фабрика `copyOf`, `with...` для immutable objects, ручное копирование нужного графа. Сериализация ради копирования обычно дороже и сложнее. Для коллекций `new ArrayList<>(original)` копирует **контейнер, но не его элементы**.
+
+</details>
+
+## 20. JVM vs JRE vs JDK
+
+<details>
+<summary>Показать ответ</summary>
+
+**JVM (Java Virtual Machine)** — спецификация виртуальной машины и её реализация (например, HotSpot), которая загружает, проверяет и исполняет байткод `.class`, управляет памятью, потоками, исключениями и GC. JVM — не то же самое, что язык Java: байткод могут генерировать Kotlin и другие языки.
+
+**JRE (Java Runtime Environment)** — среда для *запуска*: JVM + стандартные библиотеки + файлы/компоненты рантайма. Термин особенно важен исторически: с Java 9 модульная runtime image, а отдельная типовая поставка JRE зависит от вендора; для собственного компактного runtime существует `jlink`.
+
+**JDK (Java Development Kit)** — набор для *разработки*: runtime + инструменты `javac`, `jar`, `javadoc`, `jshell`, `jcmd`, `jlink`, `jdeps` и другие. Итого: JVM — «движок», runtime — окружение выполнения, JDK — инструменты сборки/разработки и runtime.
+
+**Путь от кода до выполнения:**
+
+```text
+Hello.java --javac--> Hello.class (bytecode)
+                          |
+                  ClassLoader загружает классы
+                          v
+                  Верификация / linking / initialization
+                          v
+                JVM: interpreter + JIT (HotSpot)
+                          v
+                    машинный код CPU
+```
+
+```java
+public class Hello {
+    public static void main(String[] args) { System.out.println("Hi!"); }
+}
+```
+
+```bash
+javac Hello.java       # компилирует исходник в bytecode
+javap -c Hello         # дизассемблирует байткод
+java Hello             # запускает JVM и выполняет main
+java Hello.java        # source-file mode: запуск одного исходного файла
+java -version          # версия установленного runtime
+javac -version         # версия компилятора
+```
+
+**Как достигается переносимость:** байткод платформенно-независим, но JVM и нативные библиотеки зависят от ОС/CPU. «Write once, run anywhere» требует совместимой версии Java, отсутствия специфичных native-зависимостей и корректного окружения. `.class` имеет версию формата: код, собранный более новым JDK, обычно нельзя просто запустить на более старом runtime (`UnsupportedClassVersionError`). Используй `javac --release 17` для целевой совместимости, если требуется.
+
+**JIT и интерпретатор:** JVM может сначала интерпретировать байткод, собирать профили и компилировать горячие участки в машинный код с оптимизациями (inlining, escape analysis и др.); не стоит обещать, что любой объект всегда физически попадёт в heap (JIT может оптимизировать аллокацию).
+
+**Классы и загрузка:** bootstrap/platform/application class loaders, делегирование загрузки, linking (verification, preparation, resolution) и initialization (`<clinit>`). Ошибки на этапах загрузки/связывания могут проявляться как `ClassNotFoundException`, `NoClassDefFoundError`, `ExceptionInInitializerError` — это разные случаи.
+
+**JVM vs JDK в контейнере:** для сборки приложения нужен JDK; в production часто используют минимальный runtime image (не обязательно полный JDK). Для диагностики полезно иметь средства вроде `jcmd` в отдельном debug-образе.
+
+**На собеседовании:** объясни разницу *компилятор → bytecode → JVM*, почему JVM не равна JDK, роль JIT и GC, почему версия JDK и целевой `--release` важны.
+
+</details>

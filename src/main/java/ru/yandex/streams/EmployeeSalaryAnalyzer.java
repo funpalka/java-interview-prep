@@ -64,10 +64,6 @@ public class EmployeeSalaryAnalyzer {
 
     }
 
-
-    public record Employee(String name, int age, BigDecimal salary, String company) {
-    }
-
     private static class SalaryAccumulator {
 
         private BigDecimal sum = BigDecimal.ZERO;

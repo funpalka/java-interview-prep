@@ -36,6 +36,14 @@ class WarehouseTest {
     }
 
     @Test
+    void shouldRejectNegativeShipment () {
+        warehouse.receive("Apple", 10);
+
+        assertFalse(warehouse.ship("Apple", -5));
+        assertTrue(warehouse.ship("Apple", 10));
+    }
+
+    @Test
     void shouldNotShipUnknownProduct() {
         assertFalse(warehouse.ship("Orange", 3));
     }

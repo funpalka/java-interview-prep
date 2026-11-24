@@ -1,6 +1,5 @@
 package ru.yandex.streams;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,7 +15,4 @@ public class EmployeeFinder {
                 .filter(employee -> employee.company().equals(company))
                 .findFirst();
     }
-
-
-    public record Employee (String name, int age, BigDecimal salary, String company) {}
 }

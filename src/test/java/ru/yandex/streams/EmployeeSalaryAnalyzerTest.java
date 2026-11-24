@@ -13,14 +13,14 @@ class EmployeeSalaryAnalyzerTest {
 
     @Test
     void shouldCalculateAverageSalaryForEachCompany() {
-        List<EmployeeSalaryAnalyzer.Employee> employees = List.of(
-                new EmployeeSalaryAnalyzer.Employee(
+        List<Employee> employees = List.of(
+                new Employee(
                         "Alex", 25, new BigDecimal("100.00"), "Google"),
-                new EmployeeSalaryAnalyzer.Employee(
+                new Employee(
                         "Bob", 30, new BigDecimal("200.00"), "Google"),
-                new EmployeeSalaryAnalyzer.Employee(
+                new Employee(
                         "John", 28, new BigDecimal("150.00"), "Amazon"),
-                new EmployeeSalaryAnalyzer.Employee(
+                new Employee(
                         "Kate", 32, new BigDecimal("200.00"), "Amazon")
         );
 
@@ -34,10 +34,10 @@ class EmployeeSalaryAnalyzerTest {
 
     @Test
     void shouldRoundAverageSalaryHalfUp() {
-        List<EmployeeSalaryAnalyzer.Employee> employees = List.of(
-                new EmployeeSalaryAnalyzer.Employee(
+        List<Employee> employees = List.of(
+                new Employee(
                         "Alex", 25, new BigDecimal("100.00"), "Google"),
-                new EmployeeSalaryAnalyzer.Employee(
+                new Employee(
                         "Bob", 30, new BigDecimal("100.01"), "Google")
         );
 

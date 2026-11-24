@@ -11,6 +11,9 @@ public class Warehouse {
 
     public void receive(String name, int qty) {
         //wareHouse.merge(name, qty, Integer::sum);
+        if (qty <= 0) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
         Integer prevValue = warehouse.putIfAbsent(name, qty);
         if (prevValue != null) {
             warehouse.put(name, prevValue + qty);
@@ -19,13 +22,15 @@ public class Warehouse {
     }
 
     public boolean ship(String name, int qty) {
+        if (qty <= 0) {
+            return false;
+        }
         Integer currentStock = warehouse.get(name);
         if (currentStock == null || currentStock < qty) {
             return false;
         }
         warehouse.put(name, currentStock - qty);
         return true;
-
     }
 
     public void printStock() {

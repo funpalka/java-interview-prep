@@ -21,13 +21,15 @@
 
 **GC и достижимость:** сборщик идёт от **GC roots** (например, активные стеки, статические ссылки, JNI roots) по графу ссылок. Недостижимые объекты можно освободить. Это не просто счётчик ссылок: циклы тоже собираются. Типичный generational подход опирается на гипотезу о короткой жизни большинства объектов; но алгоритмы и поколенческая модель различаются.
 
-**Сборщики и компромиссы (ориентир — HotSpot JDK 21):**
+**Сборщики и компромиссы (основной ориентир — HotSpot JDK 17):**
 
 | GC | Как работает | Когда выбирать / ограничения |
 |---|---|---|
 | **G1** | heap разбит на регионы, есть young/mixed collections, часть работы конкурентная, эвакуация объектов с STW-паузами; пытается следовать `MaxGCPauseMillis` | хороший старт для большинства сервисов, баланс пауз и throughput; настройка цели не гарантирует лимит |
-| **ZGC** | основная работа конкурентная с приложением, короткие паузы; **generational ZGC появился в JDK 21** как опция | критична низкая tail latency на большом heap; возможен CPU/memory overhead; флаги и режим зависят от версии |
+| **ZGC** | основная работа конкурентная с приложением, короткие паузы; в Java 17 используется non-generational режим | критична низкая tail latency на большом heap; возможен CPU/memory overhead; флаги и режим зависят от версии |
 | **Shenandoah** | конкурентная маркировка/эвакуация для снижения STW | низкие паузы, доступность/вариант зависят от дистрибутива и JDK |
+
+> **Новые JDK:** Generational ZGC появился как отдельный режим позже Java 17 (в JDK 21). Его нельзя считать возможностью целевой версии проекта.
 
 GC не лечит утечку, если объект **достижим**, но больше не нужен бизнесу (например, бесконечно растущий `Map`, listener без `unsubscribe`, неконтролируемый cache). Для поиска: метрики, GC logs `-Xlog:gc*`, Java Flight Recorder (JFR), профилировщик, heap dump.
 
@@ -48,7 +50,7 @@ jcmd <PID> GC.heap_dump /var/tmp/app-heap.hprof
 # 3) Сохранить все объекты, включая недостижимые (без предварительного Full GC):
 jcmd <PID> GC.heap_dump -all /var/tmp/app-all.hprof
 
-# 4) В JDK 21 поддерживается сжатие gzip, уровень например 1:
+# 4) Возможность более нового JDK: в JDK 21 поддерживается сжатие gzip:
 jcmd <PID> GC.heap_dump -gz=1 /var/tmp/app-heap.hprof.gz
 ```
 
@@ -91,7 +93,7 @@ class SessionRegistry {
 
 **Дополнительно:** `jcmd <PID> GC.class_histogram` даёт быстрый срез по классам без полного графа ссылок; JFR/GC logs помогают отличить высокую скорость аллокаций от **удержания**. Метасpace, количество потоков и native allocations смотрят другими средствами (например, Native Memory Tracking, если включён).
 
-Источники: [Oracle JDK 21 `jcmd`](https://docs.oracle.com/en/java/javase/21/docs/specs/man/jcmd.html), [G1 tuning](https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html).
+Источники для целевой версии: [Oracle JDK 17 `jcmd`](https://docs.oracle.com/en/java/javase/17/docs/specs/man/jcmd.html), [G1 tuning](https://docs.oracle.com/en/java/javase/17/gctuning/garbage-first-g1-garbage-collector1.html). Флаг `-gz` выше относится к более новому JDK 21.
 
 </details>
 
@@ -116,6 +118,26 @@ class SessionRegistry {
 | стек/очередь | `ArrayDeque` | обычно эффективнее `Stack`/`LinkedList` |
 
 `equals/hashCode`: две равные сущности должны иметь одинаковый хеш; иначе hash-структуры перестают находить элементы. `TreeSet/TreeMap` определяют эквивалентность через `compareTo`/`Comparator` (`compare(...) == 0`), а не по hash. Подробнее — вопросы 14, 16, 17, 19.
+
+### Практические шаблоны выбора
+
+```java
+// Удалить дубликаты и сохранить порядок первого появления:
+List<Integer> unique = new ArrayList<>(new LinkedHashSet<>(input));
+
+// Несколько уникальных значений на ключ с сохранением порядка:
+Map<String, LinkedHashSet<String>> phoneBook = new HashMap<>();
+phoneBook.computeIfAbsent("Alex", ignored -> new LinkedHashSet<>())
+         .add("111");
+
+// Сохранить вычисленный порядок записей результата:
+Map<String, Integer> top = new LinkedHashMap<>();
+
+// Всегда обходить ключи в отсортированном порядке:
+Map<String, Integer> stock = new TreeMap<>();
+```
+
+`LinkedHashMap` и `LinkedHashSet` платят дополнительной памятью за связный порядок. `TreeMap` поддерживает сортировку при каждом обновлении за O(log n); если сортированный результат нужен только один раз, иногда дешевле собрать данные в `HashMap`, а затем отдельно отсортировать записи.
 
 ### Generics: зачем нужны и как работают
 
@@ -264,7 +286,7 @@ for (int x : l) { /* O(n) через Iterator */ }
 <details>
 <summary>Показать ответ</summary>
 
-**HashMap (упрощённая модель реализации OpenJDK 21):** массив `Node<K,V>[] table` длиной обычно степень двойки. У `Node` есть hash, key, value, next. Для `put` вычисляется hash (`hashCode` + смешивание старших битов), индекс корзины (`(n - 1) & hash`). В пустую корзину — новый узел; при коллизии сравниваются hash и `equals`; существующее значение заменяется либо создаётся новый узел.
+**HashMap (упрощённая модель реализации OpenJDK 17):** массив `Node<K,V>[] table` длиной обычно степень двойки. У `Node` есть hash, key, value, next. Для `put` вычисляется hash (`hashCode` + смешивание старших битов), индекс корзины (`(n - 1) & hash`). В пустую корзину — новый узел; при коллизии сравниваются hash и `equals`; существующее значение заменяется либо создаётся новый узел.
 
 При множестве коллизий связанный список в корзине **может стать красно-чёрным деревом** (типичные пороги OpenJDK: treeify при 8 узлах и capacity >= 64; untreeify около 6). Порог resize ≈ `capacity * loadFactor` (часто `0.75`). При расширении таблица обычно удваивается, элементы перераспределяются. Это **детали реализации**, а не гарантии API.
 
@@ -274,6 +296,22 @@ counts.put("a", 1);
 counts.merge("a", 1, Integer::sum); // 2
 System.out.println(counts.getOrDefault("b", 0)); // 0
 ```
+
+Три похожих приёма решают разные задачи:
+
+```java
+// Получить fallback, не изменяя map:
+int current = counts.getOrDefault("b", 0);
+
+// Счётчик или объединение старого и нового значения:
+counts.merge("b", 1, Integer::sum);
+
+// Лениво создать коллекцию значений для ключа:
+Map<String, List<String>> groups = new HashMap<>();
+groups.computeIfAbsent("team", ignored -> new ArrayList<>()).add("Alex");
+```
+
+У `merge` remapping-функция вызывается для существующего non-null значения; у `computeIfAbsent` mapping-функция вызывается при отсутствии значения. Эти функции должны быть короткими, без тяжёлого I/O и рекурсивного изменения той же карты.
 
 - В среднем `get/put/remove` — O(1), худшие случаи хуже; хороший `hashCode` важен.
 - `null`-ключ допустим один; `null`-значений сколько угодно. Итерационный порядок не гарантирован.
@@ -296,11 +334,18 @@ map.computeIfAbsent("views", k -> 0); // ленивое создание
 // Высококонкурентный счётчик:
 ConcurrentHashMap<String, LongAdder> counters = new ConcurrentHashMap<>();
 counters.computeIfAbsent("pageA", k -> new LongAdder()).increment();
+
+// Уникальные посетители по дате: и внешняя map, и внутренний set concurrent.
+ConcurrentHashMap<LocalDate, Set<String>> visitors = new ConcurrentHashMap<>();
+visitors.computeIfAbsent(
+    LocalDate.now(),
+    ignored -> ConcurrentHashMap.newKeySet()
+).add("user-42");
 ```
 
-**Что насчёт синхронизации?** `Collections.synchronizedMap(new HashMap<>())` оборачивает операции одним монитором; при итерации всё равно **нужно вручную синхронизироваться** на map. `ConcurrentHashMap` масштабируется лучше при конкурентных доступах, но сложный инвариант между *несколькими ключами* может требовать отдельной блокировки/транзакции. Mapping-функции `compute` делай короткими и без рекурсивного изменения той же карты.
+**Что насчёт синхронизации?** `Collections.synchronizedMap(new HashMap<>())` оборачивает операции одним монитором; при итерации всё равно **нужно вручную синхронизироваться** на map. `ConcurrentHashMap` масштабируется лучше при конкурентных доступах, но сложный инвариант между *несколькими ключами* может требовать отдельной блокировки/транзакции. Атомарный `computeIfAbsent` не делает автоматически безопасным возвращённый mutable-объект: `ConcurrentHashMap<K, HashSet<V>>` всё ещё содержит непотокобезопасный `HashSet`. Mapping-функции `compute` делай короткими и без рекурсивного изменения той же карты.
 
-Источники: [ConcurrentHashMap Java 21 API](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html).
+Источник: [ConcurrentHashMap Java 17 API](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html).
 
 </details>
 
@@ -353,5 +398,17 @@ System.out.println(ranks.floor(4)); // 3
 ```
 
 Ещё одна ловушка — изменение значимого поля ключа **после** `put`: hash/equals меняются, а узел остаётся в прежней корзине. Решение: согласованная реализация двух методов и желательно неизменяемые ключи.
+
+Контракт `equals` требует рефлексивности, симметричности, транзитивности, согласованности и `x.equals(null) == false`. Из равенства обязан следовать одинаковый `hashCode`; одинаковый hash сам по себе равенства не означает — коллизии допустимы.
+
+```java
+record UserKey(long id, String tenant) {}
+
+Map<UserKey, String> users = new HashMap<>();
+users.put(new UserKey(42, "eu"), "Alex");
+System.out.println(users.get(new UserKey(42, "eu"))); // Alex
+```
+
+`record` удобен как неизменяемый value key, если семантика всех его компонентов действительно участвует в равенстве. У `TreeMap` другая важная грань: два ключа считаются эквивалентными для карты, если comparator возвращает `0`, даже если их `equals` возвращает `false`.
 
 </details>

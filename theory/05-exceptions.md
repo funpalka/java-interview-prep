@@ -32,6 +32,20 @@ java.lang.Object
 
 **Checked**: потомки `Exception`, кроме `RuntimeException` и её подтипов — компилятор требует обработать или объявить `throws`. **Unchecked**: `RuntimeException`, `Error` и их потомки; нет обязательной декларации `throws`. `Throwable` — общий родитель, содержит message/cause/stack trace/suppressed.
 
+| Конструкция | Что означает |
+|---|---|
+| `throw exception` | непосредственно прекращает обычное выполнение и бросает конкретный объект `Throwable` |
+| `throws IOException` | объявляет в сигнатуре, что checked exception может выйти из метода; само исключение эта декларация не создаёт |
+
+```java
+static String read(Path path) throws IOException { // часть контракта метода
+    if (path == null) {
+        throw new IllegalArgumentException("path is null"); // конкретный объект
+    }
+    return Files.readString(path);
+}
+```
+
 **Как получить распространённые исключения на практике:**
 
 ```java
@@ -64,7 +78,54 @@ catch (IOException e) {
 }
 ```
 
+Это **exception chaining**: новое исключение добавляет контекст уровня приложения, но сохраняет исходную причину в `cause`. Её можно получить через `getCause()`. Создавать новое исключение без `e` обычно плохо — теряются исходный тип, сообщение и stack trace причины.
+
+```java
+try {
+    return Integer.parseInt(input);
+} catch (NumberFormatException e) {
+    throw new ValidationException("Invalid age: " + input, e);
+}
+```
+
 `try-with-resources` автоматически закрывает `AutoCloseable` и прикрепляет ошибки при закрытии как **suppressed exceptions** к первичной ошибке. `finally` обычно выполняется, но не всегда (вопрос 32). `InterruptedException`: обычно восстановить interrupt flag (`Thread.currentThread().interrupt()`) и завершить/передать выполнение, если не пробрасываешь исключение.
+
+### AutoCloseable, порядок закрытия и suppressed exceptions
+
+Ресурсы закрываются автоматически **в обратном порядке объявления**. Если тело `try` бросило основное исключение, а `close()` — ещё одно, основное исключение не затирается: ошибка закрытия доступна через `getSuppressed()`.
+
+```java
+try (First first = new First(); Second second = new Second()) {
+    throw new IllegalStateException("body failed");
+} catch (Exception e) {
+    System.out.println(e.getMessage());
+    for (Throwable suppressed : e.getSuppressed()) {
+        System.out.println("close failed: " + suppressed.getMessage());
+    }
+}
+// Сначала вызывается second.close(), затем first.close().
+```
+
+Если тело завершилось успешно, но `close()` бросил исключение, именно оно выйдет из конструкции. Реализация `AutoCloseable.close()` должна быть идемпотентной там, где это разумно, и не должна без необходимости маскировать более важную ошибку.
+
+### `Files.lines()` vs `Files.readAllLines()`
+
+| API | Поведение и компромисс |
+|---|---|
+| `Files.readAllLines(path)` | читает все строки в `List<String>`; просто использовать, но весь файл должен поместиться в память |
+| `Files.lines(path)` | возвращает ленивый `Stream<String>`; подходит для последовательной обработки больших файлов, но stream необходимо закрыть |
+
+```java
+static long countNonEmptyLines(Path path) throws IOException {
+    try (Stream<String> lines = Files.lines(path)) {
+        return lines.filter(line -> !line.isBlank()).count();
+    }
+}
+```
+
+Открытие `Files.lines()` может бросить checked `IOException`. Поскольку чтение ленивое, ошибка, возникшая уже во время обхода stream, может быть представлена как **`UncheckedIOException`**. На границе API выбирай осознанно: оставить `IOException` в контракте либо обернуть её в unchecked-исключение с контекстом; не глотай ошибку и не возвращай частичный результат молча.
+
+**Короткий ответ для собеседования:** checked exceptions нужно обработать или объявить, unchecked — нет. `throw` бросает объект, `throws` объявляет контракт. Try-with-resources закрывает ресурсы в обратном порядке и сохраняет ошибки `close()` как suppressed, если уже есть первичная ошибка.
 
 </details>
 

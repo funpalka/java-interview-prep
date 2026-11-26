@@ -34,6 +34,19 @@ Optional<String> first = items.stream().findFirst();
 
 Для однократного источника (файл, network stream, генератор) повторное создание может быть невозможно или дорого: иногда лучше выполнить одну агрегацию, либо предварительно буферизовать данные. `Supplier<Stream<T>>` удобен только если он действительно создаёт свежий stream.
 
+Промежуточные операции ленивы: построение pipeline ещё не означает обработку элементов.
+
+```java
+Stream<String> pipeline = items.stream()
+    .map(value -> {
+        System.out.println("map: " + value);
+        return value.toUpperCase();
+    });
+
+// До терминальной операции map не выполнялся.
+List<String> upper = pipeline.toList();
+```
+
 </details>
 
 ## 23. Что делают flatMap и reduce?
@@ -60,6 +73,74 @@ String joined = Stream.of("a", "b", "c")
 ```
 
 **Почему ассоциативность важна:** параллельный stream может разбить данные и объединять частичные результаты в другом порядке. Например, `(a,b)->a-b` неассоциативна и даст неожиданный результат. Нельзя мутировать внешний `ArrayList` внутри reduce. Для изменяемого накопления обычно используй `collect` (`toList`, `groupingBy`, `joining`). **Нюанс:** `reduce(identity, accumulator, combiner)` требует согласованности accumulator/combiner и нейтральности identity.
+
+### `reduce` vs `collect`
+
+| Операция | Типичный сценарий |
+|---|---|
+| `reduce` | immutable-результат: сумма, максимум, произведение |
+| `collect` | mutable-накопитель или составная агрегация: список, map, группировка, статистика |
+
+Для группировки часто используют downstream collectors:
+
+```java
+Map<String, Long> employeeCount = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::company,
+        Collectors.counting()
+    ));
+
+Map<String, List<String>> namesByCompany = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::company,
+        Collectors.mapping(Employee::name, Collectors.toList())
+    ));
+```
+
+`groupingBy` выбирает ключ группы, `counting` считает элементы внутри группы, а `mapping` сначала преобразует элементы и передаёт их следующему collector.
+
+### Собственный `Collector.of`
+
+Когда готового collector недостаточно, можно явно описать накопитель. Для среднего `BigDecimal` нужны сумма и количество — переходить к `double` не требуется.
+
+```java
+final class AverageAccumulator {
+    private BigDecimal sum = BigDecimal.ZERO;
+    private long count;
+
+    void add(BigDecimal value) {
+        sum = sum.add(value);
+        count++;
+    }
+
+    AverageAccumulator combine(AverageAccumulator other) {
+        sum = sum.add(other.sum);
+        count += other.count;
+        return this;
+    }
+
+    BigDecimal finish() {
+        if (count == 0) {
+            throw new IllegalStateException("No values");
+        }
+        return sum.divide(
+            BigDecimal.valueOf(count),
+            2,
+            RoundingMode.HALF_UP
+        );
+    }
+}
+
+Collector<BigDecimal, AverageAccumulator, BigDecimal> averageCollector =
+    Collector.of(
+        AverageAccumulator::new,    // Supplier<A>: создать контейнер
+        AverageAccumulator::add,    // BiConsumer<A,T>: добавить элемент
+        AverageAccumulator::combine,// BinaryOperator<A>: объединить части
+        AverageAccumulator::finish  // Function<A,R>: получить результат
+    );
+```
+
+Для корректной работы с `parallelStream()` supplier должен создавать **независимый** контейнер для каждой части, accumulator не должен менять общее внешнее состояние, а combiner обязан корректно и ассоциативно объединять любые частичные результаты. Наличие combiner не делает ошибочный collector автоматически параллельно корректным. Характеристики `CONCURRENT`, `UNORDERED`, `IDENTITY_FINISH` объявляют только тогда, когда соответствующие свойства действительно выполняются.
 
 </details>
 
@@ -125,6 +206,16 @@ List<String> result = transformed.toList(); // [2, 3]
 
 Операции **ленивы**: до терминальной операции не выполняется полноценный обход источника. Некоторые операции stateful (`sorted`, `distinct`) могут буферизовать данные, некоторые short-circuit (`limit`, `findFirst`, `anyMatch`) останавливают обработку раньше. **Поток одноразовый**: после вызова терминальной операции нельзя снова использовать тот же экземпляр. У `mapToInt` возвращается `IntStream`, у `boxed()` — `Stream<Integer>`.
 
+`peek` предназначен главным образом для наблюдения и отладки, а не для обязательной бизнес-логики. Терминальная операция обрабатывает только реально нужные элементы, а иногда traversal можно оптимизировать целиком:
+
+```java
+long count = List.of("a", "b", "c").stream()
+    .peek(System.out::println)
+    .count();
+```
+
+Если размер источника известен и промежуточные операции его не меняют, реализация может получить результат `count()` без обхода элементов — тогда `peek` не вызовется. Поэтому нельзя рассчитывать на побочный эффект `peek`; если действие обязательно, выражай его явной терминальной операцией или обычным циклом.
+
 </details>
 
 ## 28. К каким переменным есть доступ у лямбда-выражений?
@@ -178,6 +269,8 @@ nums.parallelStream().forEachOrdered(System.out::println); // 3, 1, 2
 ```
 
 **Отличие от `filter`:** `findFirst/findAny/forEach` — терминальные операции; `filter` — промежуточная. `findFirst`/`findAny` могут **short-circuit**, `forEach` обходит все элементы (кроме прерывания ошибкой). На неупорядоченном источнике вроде `HashSet` «первый» не определяется контрактом последовательности. Для поиска объекта обычно `filter(predicate).findFirst()`.
+
+**Короткий ответ для собеседования:** `findFirst` соблюдает encounter order и потому может ограничивать параллелизм; `findAny` разрешает вернуть любой подходящий элемент и даёт реализации больше свободы. На неупорядоченном источнике семантика «первого» обычно не полезна.
 
 </details>
 
@@ -286,5 +379,7 @@ String z = a.orElseThrow(() -> new IllegalStateException("Missing"));
 ```
 
 `map` преобразует значение и превращает `null`-результат в empty; `flatMap` ожидает функцию, возвращающую `Optional`, и **не принимает null Optional**. `get()` на пустом бросает `NoSuchElementException`; предпочтительнее `orElseThrow` с контекстом, `ifPresent`, `map` и `flatMap`. `Optional` — value-based class: не синхронизируйся на его экземпляре и не проверяй через `==`.
+
+**Почему Optional не содержит `null`:** у него два состояния — значение присутствует и оно non-null либо значение отсутствует. `Optional.ofNullable(null)` создаёт `empty`, а не третье состояние «present null». Это убирает двусмысленность: вызывающей стороне не нужно отдельно различать `null Optional`, пустой Optional и Optional с `null`. Сам метод, возвращающий `Optional`, тоже не должен возвращать `null`.
 
 </details>

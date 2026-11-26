@@ -20,11 +20,11 @@
 
 **Тестовая пирамида:** много быстрых unit, меньше интеграционных, ещё меньше E2E — это эвристика, а не фиксированное соотношение. Тестируй **наблюдаемое поведение**, а не приватную реализацию.
 
-### Минимальный Maven (Java 21, JUnit 5 + Mockito)
+### Минимальный Maven (Java 17, JUnit 5 + Mockito)
 
 ```xml
 <properties>
-  <maven.compiler.release>21</maven.compiler.release>
+  <maven.compiler.release>17</maven.compiler.release>
   <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 </properties>
 <dependencies>
@@ -48,7 +48,7 @@
 </plugin></plugins></build>
 ```
 
-**Версии выше — воспроизводимый учебный пример, а не утверждение о последних релизах.** `mvn test` запускает unit-тесты через Surefire. Для integration tests часто используют отдельные профили/`maven-failsafe-plugin`, Testcontainers и реальные сервисы.
+**Версии выше — воспроизводимый учебный пример, а не утверждение о последних релизах.** Текущий проект уже использует JUnit 5, но Mockito в его `pom.xml` не подключён: зависимость нужна только при переносе Mockito-примеров в реальные тесты. `mvn test` запускает unit-тесты через Surefire. Для integration tests часто используют отдельные профили/`maven-failsafe-plugin`, Testcontainers и реальные сервисы.
 
 ### JUnit 5: Arrange → Act → Assert
 
@@ -79,6 +79,37 @@ class PriceCalculatorTest {
 
 **Что ещё знать:** `@BeforeEach`/`@AfterEach`, `@ParameterizedTest` с `@CsvSource`, `assertAll`, `assertTimeout`, `assertThrows`, `assertDoesNotThrow`, `@Nested`; тесты должны иметь независимые фикстуры и предсказуемый clock/random. Для async-кода используй инструменты ожидания условий с timeout, а не `Thread.sleep(500)` как «синхронизацию».
 
+`assertThrows` возвращает пойманное исключение, поэтому нужно проверять не только тип, но при необходимости message и cause. `assertInstanceOf` одновременно проверяет runtime-тип и возвращает приведённое значение.
+
+```java
+ValidationException exception = assertThrows(
+    ValidationException.class,
+    () -> AgeParser.parseAge("abc")
+);
+
+assertEquals("Invalid age: abc", exception.getMessage());
+NumberFormatException cause = assertInstanceOf(
+    NumberFormatException.class,
+    exception.getCause()
+);
+assertNotNull(cause.getMessage());
+```
+
+Для тестов файловой системы JUnit 5 предоставляет `@TempDir`: каждый тест получает управляемый временный каталог и не зависит от абсолютных путей или мусора предыдущего запуска.
+
+```java
+@TempDir
+Path tempDir;
+
+@Test
+void readsFile() throws IOException {
+    Path file = tempDir.resolve("input.txt");
+    Files.writeString(file, "Java\n\nJUnit\n");
+
+    assertEquals(2L, NonEmptyLineCounter.countNonEmptyLines(file));
+}
+```
+
 ```java
 @org.junit.jupiter.params.ParameterizedTest
 @org.junit.jupiter.params.provider.CsvSource({"100,20,80", "50,0,50"})
@@ -86,6 +117,62 @@ void parameterized(int price, int discount, int expected) {
     assertEquals(expected, calc.finalPrice(price, discount));
 }
 ```
+
+### Пограничные случаи
+
+Минимальный полезный набор зависит от контракта, но обычно проверяют:
+
+- `null`, если он разрешён или должен отклоняться;
+- пустую строку/коллекцию и один элемент;
+- значение ровно на границе, на единицу меньше и больше;
+- отрицательные значения, ноль, переполнение;
+- дубликаты и сохранение порядка;
+- неизвестный ключ или отсутствующий файл;
+- Unicode и locale-sensitive данные;
+- исключение, его message и cause;
+- defensive copy/неизменяемость возвращённой коллекции.
+
+Например, для условия «длина строго больше `n`» обязательно нужен тест строки длиной **ровно `n`** — он отличает `>` от `>=`.
+
+### Демонстрация кода vs автоматический тест
+
+```java
+@Test
+void onlyDemonstratesOutput() {
+    try (ManagedResource resource = new ManagedResource("file.txt")) {
+        System.out.println("work");
+    }
+}
+```
+
+Такой метод проходит, если не было исключения, но не проверяет содержание или порядок вывода. Это демонстрация либо smoke-проверка «не упало», а не полноценная автоматическая проверка поведения. Настоящий тест должен иметь проверяемый oracle: ожидаемое значение, состояние, исключение или существенное взаимодействие.
+
+Если контракт действительно требует вывод в `System.out`, его можно временно перехватить. Глобальный stream необходимо восстановить даже при падении assertion:
+
+```java
+@Test
+void printsStock() {
+    PrintStream original = System.out;
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+    try {
+        System.setOut(new PrintStream(buffer, true, StandardCharsets.UTF_8));
+
+        Warehouse warehouse = new Warehouse();
+        warehouse.receive("Apple", 2);
+        warehouse.printStock();
+
+        assertEquals(
+            "Apple: 2" + System.lineSeparator(),
+            buffer.toString(StandardCharsets.UTF_8)
+        );
+    } finally {
+        System.setOut(original);
+    }
+}
+```
+
+Подмена `System.out` затрагивает глобальное состояние и мешает параллельным тестам. В production-коде часто лучше внедрить `PrintStream`/writer или вернуть форматированную строку, чтобы тестировать без глобальной подмены.
 
 **Тестирование с реальной БД:** предпочти изолированную временную БД/Testcontainers для проверки SQL, индексов, транзакций и JDBC/JPA mappings; H2 не всегда совпадает с PostgreSQL/MySQL. Транзакционный rollback подходит не всем интеграционным сценариям (например, другой поток/процесс).
 

@@ -56,10 +56,10 @@ public class EmployeeSalaryAnalyzer {
                                 //(left, right) -> left.combine(right), //BinaryOperator - принимает 2 объекта вовращает 1
                                 //acc -> acc.average() //Function принимает один объект возвращает результат(возможно другого типа)
 
-                                SalaryAccumulator::new,
-                                SalaryAccumulator::add,
-                                SalaryAccumulator::combine,
-                                SalaryAccumulator::average
+                                SalaryAccumulator::new,   //создать накопитель (Supplier<A> supplier())
+                                SalaryAccumulator::add,   //добавить в накопитель BiConsumer<A, T> accumulator()
+                                SalaryAccumulator::combine, //склеить два накопителя BinaryOperator<A> combiner()
+                                SalaryAccumulator::average  //преобразовать накопитель в результат Function<A, R> finisher()
                         )));
 
     }

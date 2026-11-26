@@ -23,15 +23,17 @@
 ## Первоисточники
 
 - [GitHub: collapsed sections](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/organizing-information-with-collapsed-sections)
-- [Java SE 21 — JLS](https://docs.oracle.com/javase/specs/jls/se21/html/index.html)
-- [Java SE 21 — API](https://docs.oracle.com/en/java/javase/21/docs/api/index.html)
-- [Java SE 21 — Garbage Collection](https://docs.oracle.com/en/java/javase/21/gctuning/)
+- [Java SE 17 — JLS](https://docs.oracle.com/javase/specs/jls/se17/html/index.html)
+- [Java SE 17 — API](https://docs.oracle.com/en/java/javase/17/docs/api/index.html)
+- [Java SE 17 — Garbage Collection](https://docs.oracle.com/en/java/javase/17/gctuning/)
 - [Notion: importing data](https://www.notion.com/help/import-data-into-notion)
 
 ## Примечания к расширенной версии
 
 - Вопросы сохранены с исходными номерами; подробные ответы находятся внутри раскрывающихся блоков.
-- Примеры ориентированы на Java 21. Фрагменты, иллюстрирующие отдельный принцип, иногда приведены как части класса/теста, а не самостоятельные запускаемые программы.
+- Основная целевая версия — **Java 17**, как в `pom.xml` проекта. Возможности более новых JDK помечаются отдельно и не считаются доступными в Java 17.
+- Фрагменты, иллюстрирующие отдельный принцип, иногда приведены как части класса/теста, а не самостоятельные запускаемые программы.
 - Материалы **про JVM, GC и коллекции** различают гарантии Java API и детали реализации HotSpot/OpenJDK: детали могут меняться между версиями.
 - Зависимости JUnit/Mockito в примере зафиксированы как учебный вариант; перед созданием реального проекта можно выбрать подходящие поддерживаемые версии.
+- Практические примеры опираются на упражнения проекта (строки, коллекции, Stream API, исключения и тестирование), не меняя исходную нумерацию 39 вопросов.
 - Файлы с heap dump могут содержать секреты и персональные данные — не загружай их в GitHub.
